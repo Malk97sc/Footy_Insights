@@ -1,0 +1,10 @@
+footyVenv/
+
+config/api_keys.json
+
+data/raw/
+data/processed/
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
