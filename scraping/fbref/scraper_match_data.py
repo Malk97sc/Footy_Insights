@@ -1,0 +1,86 @@
+# test_long_format.py
+
+import pandas as pd
+from pathlib import Path
+from urllib.parse import urlparse
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from bs4 import BeautifulSoup
+import time
+
+def extract_match_id(url):
+    return urlparse(url).path.split('/')[3]
+
+def parse_team_stats_html(team_stats_html):
+    """
+    returns (data, home_team, away_team) where data is a list of [stat, home_val, away_val].
+    """
+    soup = BeautifulSoup(team_stats_html, "html.parser")
+    table = soup.find("table")
+    rows = table.find_all("tr")
+
+    #extract the name of the teams
+    home_team = rows[0].find("th", style="text-align: right;").get_text(strip=True)
+    away_team = rows[0].find("th", style="text-align: left;").get_text(strip=True)
+    data = []
+    for i in range(1, len(rows), 2):
+        th = rows[i].find("th")
+        if not th: continue
+        stat = th.get_text(strip=True)
+        tds = rows[i+1].find_all("td")
+        home = tds[0].get_text(" ", strip=True)
+        away = tds[1].get_text(" ", strip=True)
+        data.append([stat, home, away])
+    return data, home_team, away_team
+
+def parse_team_stats_extra_html(extra_html, home_team, away_team):
+    """
+    returns a list of dictionaries with:
+    { "stat": <stat name>, 
+        <home_team>: <home value>, 
+        <away_team>: <away value> }
+    """
+    soup = BeautifulSoup(extra_html, "html.parser")
+    container = soup.find(id="team_stats_extra")
+    if not container:
+        return []
+    data = []
+    for block in container.find_all("div", recursive=False):
+        values = [d.get_text(strip=True) for d in block.find_all("div", recursive=False) if "th" not in (d.get("class") or [])]
+        for i in range(0, len(values), 3):
+            if i+2 < len(values):
+                home_val, stat, away_val = values[i], values[i+1], values[i+2]
+                #print(home_val)
+                #print(stat)
+                #print(away_val)
+                data.append({"Stat": stat, home_team: home_val, away_team: away_val})
+    return data
+
+def scrape_team_stats(url, headless = True):
+    options = Options()
+    if headless:
+        options.add_argument("--headless")
+    driver = webdriver.Chrome(options=options)
+    driver.get(url)
+    time.sleep(5)
+
+    team_stats_html = driver.find_element(By.ID, "team_stats").get_attribute("outerHTML")
+    team_stats_extra_html = driver.find_element(By.ID, "team_stats_extra").get_attribute("outerHTML")
+    driver.quit()
+
+    #to see the content of the 
+    #print(team_stats_html)
+    #print(team_stats_extra_html)
+
+    #parse team_stats to get team names and key data
+    main_rows, home, away = parse_team_stats_html(team_stats_html)
+    extra_rows = parse_team_stats_extra_html(team_stats_extra_html, home, away)
+
+    df_main = pd.DataFrame(main_rows, columns=["Stat", home, away])
+    df_extra = pd.DataFrame(extra_rows, columns=["Stat", home, away])
+    return df_main, df_extra, home, away
+
+def melt_team_stats(df, tag):
+    return df.melt(id_vars=["Stat"], var_name="Team", value_name="Value").assign(Table=tag)
+

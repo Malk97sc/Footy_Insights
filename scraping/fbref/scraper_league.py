@@ -64,3 +64,10 @@ def scrape_fixtures(competition_id = 9, season_slug= "2023-2024", league_name = 
     df["Match URL"] = match_urls #the most important column
 
     return df
+
+def combine_all_stats(self, season="2023-2024"):
+    stats_path = self.data_dir / "team_stats" / "long" / season
+    all_files = list(stats_path.glob("*.csv"))
+    all_dfs = [pd.read_csv(f) for f in all_files]
+    df_combined = pd.concat(all_dfs, ignore_index=True)
+    df_combined.to_csv(self.data_dir / f"team_stats_long_{season}.csv", index=False)
