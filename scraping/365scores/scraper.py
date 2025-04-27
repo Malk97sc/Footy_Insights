@@ -66,7 +66,11 @@ def get_today_games(league, debug = False):
                     'home_team': home_name,
                     'away_team': away_name,
                     'start_time': game_datetime.strftime("%H:%M"),
-                    'match_url': match_url
+                    'match_url': match_url,
+                    'home_id': home_id,
+                    'away_id': away_id,
+                    'league_id': league_id,
+                    'match_id': match_id
                 })
 
         df = pd.DataFrame(match_list)
