@@ -6,6 +6,8 @@ import sys
 import re
 from pathlib import Path
 from datetime import datetime
+from dateutil import parser as date_parser
+from urllib.parse import urlparse, parse_qs     
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from footyIG.config import *
@@ -13,6 +15,98 @@ from footyIG.config import *
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
 }
+
+def get_all_season_games(league, save_data=False, save_json=False):
+    """
+    Get ALL season games (historical) for a given league using the correct endpoint.
+
+    Args:
+        league (str): Name of the league (must exist in get_possible_leagues_for_page()).
+        save_data (bool): Save raw JSON if True.
+
+    Returns:
+        pd.DataFrame: All season games.
+    """
+    leagues = get_possible_leagues_for_page('365Scores')
+    league_id = leagues[league]['id']
+
+    base_url   = "https://webws.365scores.com"
+    results_ep = f"{base_url}/web/games/results/"
+    base_params     = {
+        'appTypeId': 5,
+        'langId': 29,
+        'timezoneName': 'America/Bogota',
+        'userCountryId': 109,
+        'competitions': league_id,
+        'showOdds': 'true',
+        'includeTopBettingOpportunity': 1,
+        'topBookmaker': 4
+    }
+
+    resp0 = requests.get(results_ep, params=base_params)
+    resp0.raise_for_status()
+    data0      = resp0.json()
+    snapshot   = data0['lastUpdateId']
+    round_keys = [
+        rf['key'] for rf in data0.get('roundFilters', [])
+        if rf['key'] #skip the "" in all games
+    ]
+
+    all_games = []
+
+    for rk in round_keys: 
+        params = {
+            **base_params,
+            'lastUpdateId': snapshot,
+            'roundKey':     rk
+        }
+        r = requests.get(results_ep, params=params)
+        r.raise_for_status()
+        games = r.json().get('games', [])
+        all_games.extend(games)
+
+        if save_json:
+            with open('matches_data.json','w',encoding='utf-8') as f:
+                json.dump(all_games, f, ensure_ascii=False, indent=4)
+
+        time.sleep(0.5)  #wait the server connection
+
+    records = []
+    for g in all_games:
+        h = g['homeCompetitor']
+        a = g['awayCompetitor']
+        dt = date_parser.parse(g['startTime'])
+        records.append({
+            'roundNum': g.get('roundNum'),
+            'roundName': g.get('roundName'),
+            'match_date': dt.strftime("%Y-%m-%d"),
+            'start_time': dt.strftime("%H:%M"),
+            'home_team': h['name'],
+            'away_team': a['name'],
+            'home_id': h['id'],
+            'away_id': a['id'],
+            'league_id': league_id,
+            'match_id': g['id'],
+            'match_url': (
+                f"https://www.365scores.com/es/football/match/"
+                #f"{url_name}-{league_id}/" #FALTA IMPLEMENTAR
+                f"premier-league-{league_id}/"
+                f"{h['nameForURL']}-{a['nameForURL']}-"
+                f"{h['id']}-{a['id']}-{league_id}"
+                f"#id={g['id']}"
+            ),
+            '_dt': dt  #to sort
+        })
+
+    df = pd.DataFrame.from_records(records)
+    df['roundNum'] = pd.to_numeric(df['roundNum'], errors='coerce') #to sort the dataFrame
+    df = df.sort_values(['roundNum', '_dt']).reset_index(drop=True).drop(columns=['_dt'])
+    
+    if save_data:
+        df.to_csv('matches.csv', index=False)
+
+    return df
+
 
 def get_today_games(league, save_data = False):
         """
@@ -33,6 +127,8 @@ def get_today_games(league, save_data = False):
         url = f'https://webws.365scores.com/web/games/?appTypeId=5&langId=29&competitions={league_id}'
 
         response = requests.get(url, headers)
+        if response.status_code != 200:
+            raise Exception(f"Error in competitions request: {response.status_code}")
         data = response.json()
 
         if save_data:
