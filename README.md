@@ -1,5 +1,10 @@
 # Footy Insights
 
+<p align="center">
+  <img src="assets/footy.png" alt="Footy Logo" width="200"/>
+</p>
+
+
 **Footy Insights** is a data-driven football analytics project focus on the top leagues in Europe and South America, including England, Spain, Italy, Germany, and Colombia.
 
 ## Objective
