@@ -1,7 +1,7 @@
 # Footy Insights
 
 <p align="center">
-  <img src="assets/footy.png" alt="Footy Logo" width="200"/>
+  <img src="assets/footy.png" alt="Footy Logo" width="600"/>
 </p>
 
 
