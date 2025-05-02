@@ -13,17 +13,20 @@ def get_possible_leagues(league, season, page):
 
     possible_leagues = {
         '365Scores': {
-            'Bundesliga': {'id': 25, 'seasons': None},
-            'DFB-Pokal': {'id': 28, 'seasons': None},
-            'Premier League': {'id': 7, 'seasons': None},
-            'FA Cup': {'id': 8, 'seasons': None},
-            'LaLiga': {'id': 11, 'seasons': None},
-            'Copa del Rey': {'id': 13, 'seasons': None},
-            'Brasileirao': {'id': 113, 'seasons': None},
-            'Primera Division Colombia': {'id': 620, 'seasons': None},
-            'Champions League': {'id': 572, 'seasons': None},
-            'Copa America': {'id': 595, 'seasons': None},
-            'Euros': {'id': 6316, 'seasons': None},
+            'Bundesliga': {'id': 25, 'URLname': 'bundesliga' ,'seasons': None},
+            'DFB-Pokal': {'id': 28, 'URLname': 'dfb-pokal' ,'seasons': None},
+            'Premier League': {'id': 7, 'URLname': 'premier-league', 'seasons': None},
+            'FA Cup': {'id': 8, 'URLname': 'fa-cup' ,'seasons': None},
+            'LaLiga': {'id': 11, 'URLname': 'laliga', 'seasons': None},
+            'Copa del Rey': {'id': 13, 'URLname': 'copa-del-rey' ,'seasons': None},
+            'Betplay Dimayor': {'id': 620, 'URLname': 'liga-betplay', 'seasons': None},
+            'Libertadores': {'id': 102, 'URLname': 'libertadores', 'season': None},
+            'Sudamericana': {'id': 389, 'URLname': 'conmebol-sudamericana', 'season': None},
+            'Europa League': {'id': 573, 'URLname': 'uefa-europa-league', 'seasons': None},
+            'Conference League': {'id': 7685, 'URLname': 'uefa-conference-league', season: None},
+            'Champions League': {'id': 572, 'URLname': 'uefa-champions-league', 'seasons': None},
+            'Copa America': {'id': 595, 'URLname': 'copa-america', 'seasons': None},
+            'Eurocopa': {'id': 6316, 'URLname': 'euro', 'seasons': None},
         },
     }
 
@@ -49,6 +52,9 @@ def get_possible_leagues(league, season, page):
             raise InvalidSeasonException(season, possible_seasons_list)
 
     return possible_leagues
+
+def get_all_leagues(page = '365Scores'):
+    return list(get_possible_leagues_for_page(page).keys())
 
 def get_possible_leagues_for_page(page):
     """Get possible leagues for a particular page."""

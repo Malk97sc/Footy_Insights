@@ -1,17 +1,325 @@
-import re
-import time
-import threading
-from functools import lru_cache
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import BytesIO
-
-from .config import get_possible_leagues_for_page
-from .exceptions import MatchDoesntHaveInfo
-
 import pandas as pd
+import time
+import json
 import requests
-from bs4 import BeautifulSoup
-from PIL import Image
+import re
+from datetime import datetime
+from dateutil import parser as date_parser
+from footyIG.config import *
 
 class Scores365:
-    pass
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+    }
+
+    def _validate_league(self, league, page='365Scores'):
+        possible_leagues = get_possible_leagues_for_page(page)
+        if league not in possible_leagues:
+            raise ValueError(f"League '{league}' is not available. Choose one of: {list(possible_leagues.keys())}")
+        return possible_leagues[league]
+
+    def get_all_season_games(self, league, save_data=False, save_json=False):
+        """
+        Get ALL season games (historical) for a given league.
+
+        Args:
+            league (str): Name of the league (must exist in get_possible_leagues_for_page()).
+            save_data (bool): Save all the games in csv file if True.
+            save_json (bool):  Save raw JSON if True.
+
+        Returns:
+            pd.DataFrame: All season games.
+        """
+        league_config = self._validate_league(league, page='365Scores')
+        league_id = league_config['id']
+        url_name = league_config['URLname']
+
+        base_url = "https://webws.365scores.com"
+        results_ep = f"{base_url}/web/games/results/"
+        base_params = {
+            'appTypeId': 5,
+            'langId': 29,
+            'timezoneName': 'America/Bogota',
+            'userCountryId': 109,
+            'competitions': league_id,
+            'showOdds': 'true',
+            'includeTopBettingOpportunity': 1,
+            'topBookmaker': 4
+        }
+
+        resp0 = requests.get(results_ep, params=base_params)
+        resp0.raise_for_status()
+        data0 = resp0.json()
+        snapshot = data0['lastUpdateId']
+        round_keys = [rf['key'] for rf in data0.get('roundFilters', []) if rf['key']]
+
+        all_games = []
+
+        for rk in round_keys:
+            params = {
+                **base_params,
+                'lastUpdateId': snapshot,
+                'roundKey': rk
+            }
+            r = requests.get(results_ep, params=params)
+            r.raise_for_status()
+            games = r.json().get('games', [])
+            all_games.extend(games)
+
+            if save_json:
+                with open(f'{url_name}_raw_matches.json','w',encoding='utf-8') as f:
+                    json.dump(all_games, f, ensure_ascii=False, indent=4)
+
+            time.sleep(0.5)
+
+        records = []
+        for g in all_games:
+            h = g['homeCompetitor']
+            a = g['awayCompetitor']
+            dt = date_parser.parse(g['startTime'])
+            records.append({
+                'roundNum': g.get('roundNum'),
+                'roundName': g.get('roundName'),
+                'match_date': dt.strftime("%Y-%m-%d"),
+                'start_time': dt.strftime("%H:%M"),
+                'home_team': h['name'],
+                'away_team': a['name'],
+                'home_id': h['id'],
+                'away_id': a['id'],
+                'league_id': league_id,
+                'match_id': g['id'],
+                'match_url': (
+                    f"https://www.365scores.com/es/football/match/"
+                    f"{url_name}-{league_id}/"
+                    f"{h['nameForURL']}-{a['nameForURL']}-"
+                    f"{h['id']}-{a['id']}-{league_id}"
+                    f"#id={g['id']}"
+                ),
+                '_dt': dt
+            })
+
+        df = pd.DataFrame.from_records(records)
+        df['roundNum'] = pd.to_numeric(df['roundNum'], errors='coerce')
+        df = df.sort_values(['roundNum', '_dt']).reset_index(drop=True).drop(columns=['_dt'])
+
+        if save_data:
+            df.to_csv(f'{url_name}_matches.csv', index=False)
+
+        return df
+
+    def get_today_games(self, league, save_data=False):
+        """
+            Get all today games for a league
+
+            Args:
+            league (str): Possible leagues in get_available_leagues("365Scores").
+                          The page don't show stats from previous seasons.
+
+            Returns:
+                df: DataFrame with all the games.
+        """
+        league_config = self._validate_league(league)
+        league_id = league_config['id']
+        url_name = league_config['URLname']
+        print(league_id)
+        print(url_name)
+
+        url = f'https://webws.365scores.com/web/games/?appTypeId=5&langId=29&competitions={league_id}'
+        response = requests.get(url, headers=self.headers)
+        if response.status_code != 200:
+            raise Exception(f"Error in competitions request: {response.status_code}")
+        data = response.json()
+
+        if save_data:
+            with open(f'today_games{league}.json', 'w') as json_file:
+                json.dump(data, json_file, indent=4)
+
+        games = data['games']
+        today = datetime.now().date()
+        match_list = []
+
+        for game in games:
+            game_datetime = datetime.fromisoformat(game['startTime'].replace('Z', '+00:00'))
+            game_date = game_datetime.date()
+
+            if game_date == today:
+                home = game['homeCompetitor']
+                away = game['awayCompetitor']
+                match_url = f"https://www.365scores.com/es/football/match/{url_name}-{league_id}/{home['nameForURL']}-{away['nameForURL']}-{home['id']}-{away['id']}-{league_id}#id={game['id']}"
+                match_list.append({
+                    'home_team': home['name'],
+                    'away_team': away['name'],
+                    'start_time': game_datetime.strftime("%H:%M"),
+                    'match_url': match_url,
+                    'home_id': home['id'],
+                    'away_id': away['id'],
+                    'league_id': league_id,
+                    'match_id': game['id']
+                })
+
+        return pd.DataFrame(match_list)
+
+    def _parse_dataframe(self, obj):
+        df = pd.DataFrame(obj['rows'])
+        df_1 = df['entity'].apply(pd.Series)
+        df_2 = df['stats'].apply(pd.Series)[0].apply(pd.Series)
+        df_concat = pd.concat([df_1, df_2], axis=1)[['id', 'name', 'positionName', 'value']]
+        df_concat['estadistica'] = obj['name']
+        return df_concat
+
+    def get_league_top_players_stats(self, league, save_data=False):
+        """Get top performers of certain statistics for a league and a season
+
+        Args:
+            league (str): Possible leagues in get_available_leagues("365Scores").
+                          The page don't show stats from previous seasons.
+
+        Returns:
+            df: DataFrame with all the stats, values and players.
+        """
+        league_config = self._validate_league(league, page='365Scores')
+        league_id = league_config['id']
+        url_name = league_config['URLname']
+
+        url = f'https://webws.365scores.com/web/stats/?appTypeId=5&langId=29&timezoneName=America/Bogota&userCountryId=170&competitions={league_id}&competitors=&withSeasons=true'
+        response = requests.get(url, headers=self.headers)
+        time.sleep(2)
+        stats = response.json()['stats']
+
+        if save_data:
+            with open(f'general_stats_{league}.json', 'w') as json_file:
+                json.dump(stats, json_file, indent=4)
+
+        athlete = stats['athletesStats']
+        df = pd.DataFrame()
+        for obj in athlete:
+            stats_df = self._parse_dataframe(obj)
+            df = pd.concat([df, stats_df])
+        return df
+
+    def _get_ids(self, match_url):
+        """Extracts matchup_id and game_id from match URL."""
+        matchup_match = re.search(r'-(\d+-\d+-\d+)', match_url)
+        game_match = re.search(r'id=(\d+)', match_url)
+        return (matchup_match.group(1) if matchup_match else None,
+                game_match.group(1) if game_match else None)
+
+    def get_match_data(self, match_url, save_data=False):
+        """Fetch complete match data from 365Scores.
+        Args:
+            match_url: Link of the game
+            save_data: To save the json data. Default is False
+        
+        Returns:
+            match_data: Json with all the stats from a match"""
+        
+        matchup_id, game_id = self._get_ids(match_url)
+        if not matchup_id or not game_id:
+            raise ValueError("Fail to extract matchup_id or game_id.")
+
+        url = f'https://webws.365scores.com/web/game/?appTypeId=5&langId=29&timezoneName=America/Buenos_Aires&userCountryId=382&gameId={game_id}&matchupId={matchup_id}&topBookmaker=14'
+        response = requests.get(url, headers=self.headers)
+        if response.status_code != 200:
+            raise Exception(f"Error in request: {response.status_code}")
+
+        time.sleep(2)
+        match_data = response.json()['game']
+
+        if save_data:
+            with open(f'match_stats_{game_id}.json', 'w') as json_file:
+                json.dump(match_data, json_file, indent=4)
+
+        return match_data
+
+    def get_match_stats(self, game_id):
+        """Fetch statistics for a match from 365Scores."""
+        url = f'https://webws.365scores.com/web/game/stats/?appTypeId=5&langId=29&timezoneName=America/Buenos_Aires&userCountryId=382&games={game_id}'
+        response = requests.get(url, headers=self.headers)
+        if response.status_code != 200:
+            raise Exception(f"Error in stats request: {response.status_code}")
+
+        time.sleep(2)
+        return response.json()
+
+    def extract_statistics(self, match_url):
+        """
+        Extract and organize match statistics into a DataFrame.
+
+        Args:
+            match_url (str): URL of the match on 365Scores.
+
+        Returns:
+            df_stats (DataFrame): Organized DataFrame with real team names.
+        """
+        matchup_id, game_id = self._get_ids(match_url)
+        match_data = self.get_match_data(match_url)
+
+        try:
+            status_group = match_data['statusGroup']
+        except KeyError:
+            print("Error: 'statusGroup' not found in match_data.")
+            return pd.DataFrame()
+
+        stats_dict = {}
+
+        if status_group in [3, 4]:
+            stats_data = self.get_match_stats(game_id)
+            try:
+                statistics = stats_data['statistics']
+                competitors = stats_data['competitors']
+
+                team1_id = competitors[0]['id']
+                team1_name = competitors[0]['name']
+
+                team2_id = competitors[1]['id']
+                team2_name = competitors[1]['name']
+
+                for stat in statistics:
+                    stat_name = stat.get('name', 'Unknown')
+                    team_id = stat.get('competitorId')
+                    value = stat.get('value')
+
+                    if stat_name not in stats_dict:
+                        stats_dict[stat_name] = {}
+
+                    if team_id == team1_id:
+                        stats_dict[stat_name][team1_name] = value
+                    elif team_id == team2_id:
+                        stats_dict[stat_name][team2_name] = value
+
+            except KeyError:
+                print("Error: Unexpected statistics format in stats_data.")
+                return pd.DataFrame()
+
+        elif status_group == 2:
+            try:
+                home_stats = match_data['homeCompetitor']['seasonStatistics']
+                away_stats = match_data['awayCompetitor']['seasonStatistics']
+
+                home_team_name = match_data['homeCompetitor']['name']
+                away_team_name = match_data['awayCompetitor']['name']
+
+                for stat_category in set(home_stats.keys()).union(away_stats.keys()):
+                    home_value = home_stats.get(stat_category, None)
+                    away_value = away_stats.get(stat_category, None)
+
+                    stats_dict[stat_category] = {
+                        home_team_name: home_value,
+                        away_team_name: away_value
+                    }
+            except KeyError:
+                print("Error: 'seasonStatistics' not found for one of the teams.")
+                return pd.DataFrame()
+
+        else:
+            print(f"Info: Match with unknown statusGroup = {status_group}. No statistics extracted.")
+            return pd.DataFrame()
+
+        if not stats_dict:
+            print("Warning: No statistics extracted after processing.")
+            return pd.DataFrame()
+
+        df_stats = pd.DataFrame.from_dict(stats_dict, orient='index')
+        df_stats.index.name = 'Statistic'
+        df_stats.reset_index(inplace=True)
+        return df_stats
