@@ -6,8 +6,7 @@ import sys
 import re
 from pathlib import Path
 from datetime import datetime
-from dateutil import parser as date_parser
-from urllib.parse import urlparse, parse_qs     
+from dateutil import parser as date_parser  
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 from footyIG.config import *
@@ -16,19 +15,27 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
 }
 
+def validate_league(league, page='365Scores'):
+    possible_leagues = get_possible_leagues_for_page(page)
+    if league not in possible_leagues:
+        raise ValueError(f"League '{league}' is not available. Choose one of: {list(possible_leagues.keys())}")
+    return possible_leagues[league]
+
 def get_all_season_games(league, save_data=False, save_json=False):
     """
-    Get ALL season games (historical) for a given league using the correct endpoint.
+    Get ALL season games (historical) for a given league.
 
     Args:
         league (str): Name of the league (must exist in get_possible_leagues_for_page()).
-        save_data (bool): Save raw JSON if True.
+        save_data (bool): Save all the games in csv file if True.
+        save_json (bool):  Save raw JSON if True.
 
     Returns:
         pd.DataFrame: All season games.
     """
-    leagues = get_possible_leagues_for_page('365Scores')
-    league_id = leagues[league]['id']
+    league_config = validate_league(league, page='365Scores')
+    league_id = league_config['id']
+    url_name = league_config['URLname']
 
     base_url   = "https://webws.365scores.com"
     results_ep = f"{base_url}/web/games/results/"
@@ -66,7 +73,7 @@ def get_all_season_games(league, save_data=False, save_json=False):
         all_games.extend(games)
 
         if save_json:
-            with open('matches_data.json','w',encoding='utf-8') as f:
+            with open(f'{url_name}_raw_matches.json','w',encoding='utf-8') as f:
                 json.dump(all_games, f, ensure_ascii=False, indent=4)
 
         time.sleep(0.5)  #wait the server connection
@@ -89,8 +96,7 @@ def get_all_season_games(league, save_data=False, save_json=False):
             'match_id': g['id'],
             'match_url': (
                 f"https://www.365scores.com/es/football/match/"
-                #f"{url_name}-{league_id}/" #FALTA IMPLEMENTAR
-                f"premier-league-{league_id}/"
+                f"{url_name}-{league_id}/" 
                 f"{h['nameForURL']}-{a['nameForURL']}-"
                 f"{h['id']}-{a['id']}-{league_id}"
                 f"#id={g['id']}"
@@ -103,10 +109,9 @@ def get_all_season_games(league, save_data=False, save_json=False):
     df = df.sort_values(['roundNum', '_dt']).reset_index(drop=True).drop(columns=['_dt'])
     
     if save_data:
-        df.to_csv('matches.csv', index=False)
+        df.to_csv(f'{url_name}_matches.csv', index=False)
 
     return df
-
 
 def get_today_games(league, save_data = False):
         """
@@ -120,9 +125,9 @@ def get_today_games(league, save_data = False):
                 df: DataFrame with all the games.
         """
 
-        leagues = get_possible_leagues_for_page('365Scores')
-        #print(leagues)
-        league_id = leagues[league]['id']
+        league_config = validate_league(league, page='365Scores')
+        league_id = league_config['id']
+        url_name = league_config['URLname']
 
         url = f'https://webws.365scores.com/web/games/?appTypeId=5&langId=29&competitions={league_id}'
 
@@ -157,7 +162,7 @@ def get_today_games(league, save_data = False):
                 away_id = away['id']
                 match_id = game['id']
 
-                match_url = f"https://www.365scores.com/es/football/match/premier-league-{league_id}/{home_for_url}-{away_for_url}-{home_id}-{away_id}-{league_id}#id={match_id}"
+                match_url = f"https://www.365scores.com/es/football/match/{url_name}-{league_id}/{home_for_url}-{away_for_url}-{home_id}-{away_id}-{league_id}#id={match_id}"
 
                 match_list.append({
                     'home_team': home_name,
@@ -191,14 +196,13 @@ def get_league_top_players_stats(league, save_data = False):
         Returns:
             df: DataFrame with all the stats, values and players.
         """
-        leagues = get_possible_leagues_for_page('365Scores')
-        #print(leagues)
-        league_id = leagues[league]['id']
-        #print(league_id)
+        league_config = validate_league(league, page='365Scores')
+        league_id = league_config['id']
+        url_name = league_config['URLname']
         
-        response = requests.get(f'https://webws.365scores.com/web/stats/?appTypeId=5&langId=29&timezoneName=America/Bogota&userCountryId=170&competitions={league_id}&competitors=&withSeasons=true', headers=headers)
-        
-        time.sleep(3)
+        url = f'https://webws.365scores.com/web/stats/?appTypeId=5&langId=29&timezoneName=America/Bogota&userCountryId=170&competitions={league_id}&competitors=&withSeasons=true'
+        response = requests.get(url, headers=headers)
+        time.sleep(2)
         stats = response.json()
         #print(stats)
         general_stats = stats['stats']
