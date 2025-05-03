@@ -395,7 +395,7 @@ def get_players_stats(match_url, save_data=False, save_json=False):
         print(f"[INFO] Match {game_id} has no lineups. Skipping individual stats.")
         return pd.DataFrame()
 
-    # Load player info to map names and positions
+    #Search all players info to map names and positions
     players_info_df = get_players(match_url, save_data=False)
     id_to_name = dict(zip(players_info_df['id'], players_info_df['name']))
     id_to_position = {
