@@ -167,7 +167,7 @@ class Scores365:
         df_concat['estadistica'] = obj['name']
         return df_concat
 
-    def get_league_top_players_stats(self, league, save_data=False):
+    def get_league_top_scorers(self, league, save_data=False):
         """Get top performers of certain statistics for a league and a season
 
         Args:
@@ -179,7 +179,7 @@ class Scores365:
         """
         league_config = self._validate_league(league, page='365Scores')
         league_id = league_config['id']
-        url_name = league_config['URLname']
+        #url_name = league_config['URLname']
 
         url = f'https://webws.365scores.com/web/stats/?appTypeId=5&langId=29&timezoneName=America/Bogota&userCountryId=170&competitions={league_id}&competitors=&withSeasons=true'
         response = requests.get(url, headers=self.headers)
@@ -323,3 +323,77 @@ class Scores365:
         df_stats.index.name = 'Statistic'
         df_stats.reset_index(inplace=True)
         return df_stats
+
+    def get_players(self, match_url, save_data=False):
+        """Get players info for a certain match
+
+        Args:
+            match_url (url): 365Scores match URL
+
+        Returns:
+            teams_df: Player data for a match as a DataFrame.
+        """
+        match_dt = self.get_match_data(match_url)
+        teams = match_dt['members']
+        team_df = pd.DataFrame(teams)
+        matchup_id, game_id = self._get_ids(match_url)
+        if save_data:
+            team_df.to_csv(f'players_data_{game_id}.csv', index=False)
+        return team_df
+
+    def get_players_stats(self, match_url, save_data=False, save_json=False):
+        """
+        Extract all general statistics for all players in a match.
+
+        Args:
+            match_url (str): Match URL from 365Scores.
+            save_data (bool): Save the data to a CSV file.
+
+        Returns:
+            pd.DataFrame: Player statistics for the match.
+        """
+        match_data = self.get_match_data(match_url)
+        matchup_id, game_id = self._get_ids(match_url)
+
+        if not match_data.get('hasLineups'):
+            print(f"[INFO] Match {game_id} has no lineups. Skipping individual stats.")
+            return pd.DataFrame()
+
+        # Search all players info to map names and positions
+        players_info_df = self.get_players(match_url, save_data=False)
+        id_to_name = dict(zip(players_info_df['id'], players_info_df['name']))
+        id_to_position = {
+            row['id']: row.get('position', {}).get('name') for _, row in players_info_df.iterrows()
+        }
+
+        rows = []
+        for side in ['homeCompetitor', 'awayCompetitor']:
+            team = match_data.get(side, {})
+            team_name = team.get('name', 'Unknown')
+            players = team.get('lineups', {}).get('members', [])
+
+            for p in players:
+                player_id = p.get('id')
+                player_name = id_to_name.get(player_id, 'Unknown')
+                position = id_to_position.get(player_id, None)
+                stats = p.get('stats', [])
+
+                for stat in stats:
+                    stat_name = stat.get('name')
+                    value = stat.get('value')
+                    rows.append({
+                        'match_id': game_id,
+                        'team': team_name,
+                        'player_id': player_id,
+                        'player_name': player_name,
+                        'position': position,
+                        'stat_name': stat_name,
+                        'value': value
+                    })
+
+        df = pd.DataFrame(rows)
+
+        if save_data:
+            df.to_csv(f'full_individual_stats_{game_id}.csv', index=False)
+
+        return df
