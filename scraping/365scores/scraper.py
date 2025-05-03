@@ -21,7 +21,7 @@ def validate_league(league, page='365Scores'):
         raise ValueError(f"League '{league}' is not available. Choose one of: {list(possible_leagues.keys())}")
     return possible_leagues[league]
 
-def get_all_season_games(league, save_data=False, save_json=False):
+def get_all_season_games(league, save_data = False, save_json = False):
     """
     Get ALL season games (historical) for a given league.
 
@@ -359,3 +359,80 @@ def extract_statistics(match_url):
     df_stats.reset_index(inplace=True)
 
     return df_stats
+
+def get_players(match_url, save_data = False):
+    """Get players info for a certain match
+
+    Args:
+        match_url (url): 365Scores match URL
+
+    Returns:
+        teams_df: Player data for a match as a DataFrame.
+    """
+    match_dt = get_match_data(match_url)
+    teams = match_dt['members']
+    team_df = pd.DataFrame(teams)
+    matchup_id, game_id = get_ids(match_url)
+    if save_data:
+        team_df.to_csv(f'players_data_{game_id}.csv', index=False)
+    return team_df
+
+def get_players_stats(match_url, save_data=False, save_json=False):
+    """
+    Extract all general statistics for all players in a match.
+
+    Args:
+        match_url (str): Match URL from 365Scores.
+        save_data (bool): Save the data to a CSV file.
+
+    Returns:
+        pd.DataFrame: Player statistics for the match.
+    """
+    match_data = get_match_data(match_url)
+    matchup_id, game_id = get_ids(match_url)
+
+    if not match_data.get('hasLineups'):
+        print(f"[INFO] Match {game_id} has no lineups. Skipping individual stats.")
+        return pd.DataFrame()
+
+    # Load player info to map names and positions
+    players_info_df = get_players(match_url, save_data=False)
+    id_to_name = dict(zip(players_info_df['id'], players_info_df['name']))
+    id_to_position = {
+        row['id']: row.get('position', {}).get('name') for _, row in players_info_df.iterrows()
+    }
+
+    rows = []
+    for side in ['homeCompetitor', 'awayCompetitor']:
+        team = match_data.get(side, {})
+        team_name = team.get('name', 'Unknown')
+        players = team.get('lineups', {}).get('members', [])
+
+        for p in players:
+            player_id = p.get('id')
+            player_name = id_to_name.get(player_id, 'Unknown')
+            position = id_to_position.get(player_id, None)
+            stats = p.get('stats', [])
+
+            for stat in stats:
+                stat_name = stat.get('name')
+                value = stat.get('value')
+                rows.append({
+                    'match_id': game_id,
+                    'team': team_name,
+                    'player_id': player_id,
+                    'player_name': player_name,
+                    'position': position,
+                    'stat_name': stat_name,
+                    'value': value
+                })
+
+    df = pd.DataFrame(rows)
+
+    if save_data:
+        df.to_csv(f'full_individual_stats_{game_id}.csv', index=False)
+
+    return df
+
+
+
