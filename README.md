@@ -23,3 +23,5 @@ To collect, process, and analyze football match data using public APIs and web s
 - **get_all_season_games**: Provides information about all the games in the season.
 - **get_match_details**: Fetches detailed information for a specific match, including lineups, goals, and events.
 - **get_top_scorers**: Provides a list of top scorers in a specified league or competition.
+- **def get_players**: Provides all the players for a specific match.
+- **get_players_stats**: Fetches all the stadistics for all players in a game.
